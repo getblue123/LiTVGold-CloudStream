@@ -14,13 +14,36 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Install Android SDK packages
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.14.3'
+      - name: Checkout official CloudStream Gradle plugin
+        uses: actions/checkout@v5
+        with:
+          repository: recloudstream/gradle
+          ref: 69fdb8fc4be2815cbdf5ecec7f407727001cc7c7
+          path: .ci/cloudstream-gradle
+          persist-credentials: false
+      - name: Build and publish official Gradle plugin locally
+        shell: bash
+        run: |
+          printf '\nversion = "litvgold-local"\n' >> .ci/cloudstream-gradle/build.gradle.kts
+          gradle -p .ci/cloudstream-gradle publishToMavenLocal --stacktrace --no-configuration-cache
+          test -f "$HOME/.m2/repository/com/lagradost/cloudstream3/gradle/litvgold-local/gradle-litvgold-local.pom"
       - name: Compile CloudStream extension
-        run: gradle :LiTVGold:make --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :LiTVGold:make --stacktrace --no-configuration-cache 2>&1 | tee build-output.log
       - uses: actions/upload-artifact@v4
         with:
           name: LiTVGold-cs3
-          path: '**/*.cs3'
+          path: 'LiTVGold/**/*.cs3'
           if-no-files-found: error
+      - name: Upload compiler log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-log
+          path: build-output.log
+          if-no-files-found: ignore
