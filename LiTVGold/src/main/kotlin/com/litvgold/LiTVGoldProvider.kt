@@ -64,8 +64,11 @@ class LiTVGoldProvider : MainAPI() {
         return JSONObject(data).optJSONObject("props")?.optJSONObject("pageProps")
     }
     override suspend fun load(url: String): LoadResponse? {
-        if (url == liveUrl) return newLiveStreamLoadResponse(liveName, url, url) {
-            plot = "LiTV 官方直播；依服務端權限及所在地區提供播放。"
+        if (url == liveUrl) {
+            val report = inspectPlayback(url)
+            return newLiveStreamLoadResponse(liveName, url, url) {
+                plot = "LiTV 官方直播；依服務端權限及所在地區提供播放。\n\nv0.3 診斷：$report"
+            }
         }
         val show = shows.firstOrNull { page(it) == url } ?: return null
         val html = app.get(url).text
@@ -96,42 +99,72 @@ class LiTVGoldProvider : MainAPI() {
         val episodes = byNumber.map { (n, target) ->
             newEpisode(target) { episode = n; name = "第${n}集"; posterUrl = poster }
         }
+        val report = if (byNumber.isEmpty()) "E00：沒有解析到單集網址" else inspectPlayback(byNumber.values.first())
         return newTvSeriesLoadResponse(show.title, url, TvType.TvSeries, episodes) {
             posterUrl = poster
-            plot = "官方頁面：$url\n目前讀取 ${episodes.size}/${show.count} 集；播放依 LiTV 權限。"
+            plot = "官方頁面：$url\n目前讀取 ${episodes.size}/${show.count} 集；播放依 LiTV 權限。\n\nv0.3 首個可辨識集數診斷：$report"
         }
     }
     private val guestId = UUID.randomUUID().toString()
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        if (!officialPage(data)) return false
-        val info = pageProps(app.get(data).text)?.optJSONObject("programInformation")
-            ?: throw ErrorLoadingException("LiTV 網頁資料無法讀取")
-        val isLive = data == liveUrl
-        val assetId = if (isLive) info.optString("content_id") else info.optJSONArray("assets")?.optJSONObject(0)?.optString("asset_id").orEmpty()
-        val mediaType = if (isLive) info.optString("content_type") else "vod"
-        if (assetId.isBlank() || mediaType.isBlank()) throw ErrorLoadingException("LiTV 播放識別碼無法讀取")
-        val body = JSONObject().put("AssetId", assetId).put("MediaType", mediaType).put("puid", guestId)
-        val response = app.post("$mainUrl/api/get-urls-no-auth", requestBody = body.toString().toRequestBody("application/json".toMediaType())).text
-        val result = JSONObject(response)
-        val error = result.optJSONObject("error")
-        if (error != null) {
-            val message = error.optString("message")
-            throw ErrorLoadingException(if (message.contains("OutsideRegionError")) "LiTV 僅限台灣地區" else "LiTV 拒絕播放，請使用官方平台確認權限")
-        }
-        val urls = result.optJSONObject("result")?.optJSONArray("AssetURLs") ?: throw ErrorLoadingException("LiTV 未回傳播放清單")
-        var found = false
-        for (i in 0 until urls.length()) {
-            val stream = urls.optString(i)
-            val uri = try { URI(stream) } catch (_: Exception) { continue }
-            if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) continue
+    private suspend fun inspectPlayback(data: String, callback: ((ExtractorLink) -> Unit)? = null): String {
+        if (!officialPage(data)) return "E01：非預期的官方頁面網址"
+        var stage = "E02 網頁請求"
+        try {
+            val pageResponse = app.get(data)
+            stage = "E03 網頁 JSON 解析"
+            val props = pageProps(pageResponse.text) ?: return "E03：找不到 Next.js 頁面資料"
+            val info = props.optJSONObject("programInformation") ?: return "E04：找不到節目資料"
+            val isLive = data == liveUrl
+            val assetId = if (isLive) info.optString("content_id") else info.optJSONArray("assets")?.optJSONObject(0)?.optString("asset_id").orEmpty()
+            val mediaType = if (isLive) info.optString("content_type") else "vod"
+            if (assetId.isBlank() || mediaType.isBlank()) return "E05：缺少播放識別碼"
+            stage = "E06 播放 API 請求"
+            val body = JSONObject().put("AssetId", assetId).put("MediaType", mediaType).put("puid", guestId)
+            val response = app.post("$mainUrl/api/get-urls-no-auth", requestBody = body.toString().toRequestBody("application/json".toMediaType())).text
+            stage = "E07 API JSON 解析"
+            val result = JSONObject(response)
+            val error = result.optJSONObject("error")
+            if (error != null) {
+                val message = error.optString("message")
+                return when {
+                    message.contains("OutsideRegionError", true) -> "E08：LiTV 地區限制"
+                    message.contains("login", true) || message.contains("auth", true) -> "E09：LiTV 可能要求登入或授權"
+                    else -> "E10：LiTV API 回傳錯誤；請先在官方網站確認播放權限"
+                }
+            }
+            val urls = result.optJSONObject("result")?.optJSONArray("AssetURLs") ?: return "E11：API 未提供 AssetURLs"
+            if (urls.length() == 0) return "E12：API 回傳空清單"
+            var valid = 0
+            var protected = 0
+            var errors = 0
+            var candidates = 0
             val headersForHls = mapOf("Accept-Encoding" to "identity")
-            val manifest = app.get(stream, headers = headersForHls).text
-            if (!manifest.trimStart().startsWith("#EXTM3U")) continue
-            if (manifest.contains("KEYFORMAT=\"", true) && Regex("KEYFORMAT=\"(?!identity\")", RegexOption.IGNORE_CASE).containsMatchIn(manifest)) continue
-            callback(newExtractorLink(name, "LiTV HLS", stream, ExtractorLinkType.M3U8) { headers = headersForHls })
-            found = true
+            for (i in 0 until urls.length()) {
+                val stream = urls.optString(i)
+                val uri = try { URI(stream) } catch (_: Exception) { continue }
+                if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null) continue
+                candidates++
+                stage = "E13 HLS 清單讀取"
+                val manifest = try { app.get(stream, headers = headersForHls).text } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { errors++; continue }
+                if (!manifest.trimStart().startsWith("#EXTM3U")) { errors++; continue }
+                if (Regex("KEYFORMAT=\"(?!identity\")", RegexOption.IGNORE_CASE).containsMatchIn(manifest)) { protected++; continue }
+                valid++
+                if (callback != null) {
+                    stage = "E14 CloudStream 連結註冊"
+                    callback(newExtractorLink(name, "LiTV HLS", stream, ExtractorLinkType.M3U8) { headers = headersForHls })
+                }
+            }
+            if (valid > 0) return "OK：取得 $valid 個 HLS 清單（尚未驗證影音實際播放）"
+            return "E15：收到 "+urls.length()+" 筆資料；HTTPS 候選 "+candidates+"；清單讀取失敗 "+errors+"；受保護 "+protected
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return "$stage："+e.javaClass.simpleName
         }
-        if (!found) throw ErrorLoadingException("LiTV 未取得相容 HLS，請確認官方平台播放權限")
+    }
+    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
+        val report = inspectPlayback(data, callback)
+        if (!report.startsWith("OK：")) throw ErrorLoadingException(report)
         return true
     }
 }
