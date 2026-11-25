@@ -3,10 +3,10 @@ import com.lagradost.cloudstream3.gradle.CloudstreamExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 buildscript {
-    repositories { google(); mavenCentral(); maven("https://jitpack.io") }
+    repositories { mavenLocal { content { includeModule("com.lagradost.cloudstream3", "gradle") } }; google(); mavenCentral(); maven("https://jitpack.io") }
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.3")
-        classpath("com.github.recloudstream:gradle:32895aedb6")
+        classpath("com.lagradost.cloudstream3:gradle:litvgold-local")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.0")
     }
 }
