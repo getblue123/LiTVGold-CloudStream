@@ -1,7 +1,13 @@
 name: Build experimental extension
-on: [workflow_dispatch, push]
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: litvgold-builds
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,12 +40,52 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle :LiTVGold:make --stacktrace --no-configuration-cache 2>&1 | tee build-output.log
+          gradle :LiTVGold:make makePluginsJson --stacktrace --no-configuration-cache 2>&1 | tee build-output.log
       - uses: actions/upload-artifact@v4
         with:
           name: LiTVGold-cs3
           path: 'LiTVGold/**/*.cs3'
           if-no-files-found: error
+      - name: Prepare repository files
+        shell: bash
+        run: |
+          mkdir -p repo-output
+          cp LiTVGold/build/LiTVGold.cs3 repo-output/
+          cp build/plugins.json repo-output/
+          python3 - <<'PY'
+          import json, pathlib, os
+          out = pathlib.Path("repo-output")
+          base = "https://raw.githubusercontent.com/" + os.environ["GITHUB_REPOSITORY"] + "/builds/"
+          plugins = json.loads((out / "plugins.json").read_text())
+          assert len(plugins) == 1
+          assert plugins[0]["url"] == base + "LiTVGold.cs3", plugins
+          (out / "repo.json").write_text(json.dumps({"name":"LiTVGold 測試來源庫","description":"實驗版，尚未驗證手機播放","manifestVersion":1,"pluginLists":[base+"plugins.json"]}, ensure_ascii=False, indent=2))
+          PY
+      - name: Save repository files
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiTVGold-repository
+          path: repo-output/
+      - name: Publish files to builds branch (repository visibility unchanged)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          target="$RUNNER_TEMP/litvgold-builds"
+          git worktree add --detach "$target" HEAD
+          if git ls-remote --exit-code --heads origin builds >/dev/null; then
+            git fetch origin builds
+            git -C "$target" switch -C builds FETCH_HEAD
+          else
+            git -C "$target" switch --orphan builds
+          fi
+          cp repo-output/* "$target/"
+          git -C "$target" add LiTVGold.cs3 repo.json plugins.json
+          if ! git -C "$target" diff --cached --quiet; then
+            git -C "$target" commit -m "Update LiTVGold test repository"
+            git -C "$target" push origin HEAD:refs/heads/builds
+          fi
       - name: Upload compiler log
         if: always()
         uses: actions/upload-artifact@v4
