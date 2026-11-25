@@ -1,6 +1,6 @@
-version = 2
+version = 3
 cloudstream {
-    description = "金光布袋戲直播及 VOD，免登入播放介面實驗版"
+    description = "金光布袋戲直播及 VOD，v0.3 播放診斷版"
     authors = listOf("Community")
     status = 3
     tvTypes = listOf("Live", "TvSeries")
