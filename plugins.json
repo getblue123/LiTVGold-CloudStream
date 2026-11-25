@@ -1,0 +1,22 @@
+[
+    {
+        "fileHash": "sha256-975d1629e789aece698315d9b3a4e54a0eee2b609425d7e62fcb1a86c0676a99",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/getblue123/LiTVGold-CloudStream",
+        "fileSize": 17507,
+        "status": 3,
+        "language": "zh",
+        "authors": [
+            "Community"
+        ],
+        "tvTypes": [
+            "Live",
+            "TvSeries"
+        ],
+        "version": 2,
+        "internalName": "LiTVGold",
+        "description": "\u91d1\u5149\u5e03\u888b\u6232\u76f4\u64ad\u53ca VOD\uff0c\u514d\u767b\u5165\u64ad\u653e\u4ecb\u9762\u5be6\u9a57\u7248",
+        "url": "https://raw.githubusercontent.com/getblue123/LiTVGold-CloudStream/builds/LiTVGold.cs3",
+        "name": "LiTVGold"
+    }
+]

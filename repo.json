@@ -1,0 +1,8 @@
+{
+  "name": "LiTVGold 測試來源庫",
+  "description": "實驗版，尚未驗證手機播放",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/getblue123/LiTVGold-CloudStream/builds/plugins.json"
+  ]
+}
