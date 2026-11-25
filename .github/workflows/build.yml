@@ -1,20 +1,24 @@
 name: Build experimental extension
 on: [workflow_dispatch, push]
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
-      - run: gradle :LiTVGold:make --stacktrace
+      - name: Compile CloudStream extension
+        run: gradle :LiTVGold:make --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: LiTVGold-cs3
